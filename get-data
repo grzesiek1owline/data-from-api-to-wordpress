@@ -1,0 +1,163 @@
+<?php
+include "wp-load.php";
+
+
+$client = new SoapClient("https://crm.platformamieszkaniowa.pl/index.php?r=newapi/callmethod");
+$apiKey = 'apiKey';
+
+$dane = array(
+    'methodName' => 'getInvestments'
+);
+
+$dane = json_encode($dane);
+$result = $client->getCallmethod($apiKey,$dane);
+$result = json_decode($result, TRUE);
+$result = $result['result']['investments'];
+
+$posts =  get_posts(array(
+		'fields' => 'ids',
+        'posts_per_page'	=> -1,
+        'post_type'			=> 'inwestycja'
+    ));
+
+$investsIDs = array();
+$postsIDs = array();
+
+
+$invests_post = array();
+
+if(!empty($posts)) {
+	foreach ($posts as $post) {
+		$id_inwestycji = get_field('id_inwestycji', $post);
+		$investsIDs[] = $id_inwestycji;
+		$invests_post[$id_inwestycji]=$post;
+	}
+}
+$postsIDs = $posts;
+
+$usun_duplikaty_z_api = array();
+
+set_time_limit(0);
+
+$zabronione = 0;
+$liczbaWynikow = 0;
+
+foreach ($result as $i => $item){
+
+        $investId = $item['id'];
+
+        if(in_array($investId, $investsIDs)){
+            echo 'mamy duplikat' . $investId . ' : api = baza : ' . $investsIDs . '<br/>';
+            continue;
+        }
+
+        
+        if(in_array($investId, $usun_duplikaty_z_api)){
+            echo '<br/><br/>mamy duplikat w ramach jednej synchronizacji! ID inwestycji to:' . $investId . '<br/>';
+            continue;
+        }
+
+        $usun_duplikaty_z_api[] = $investId;
+
+
+        $miasto = $item['city'];
+        $updateDate = $item['updateDate'];
+        $postTitle = $item['name'];
+        $city = $item['city'];
+        $voivodeship = $item['voivodeship'];
+        $quarter = $item['quarter'];
+        $region = $item['region'];
+        $street = $item['street'];
+        $streetNumber = $item['streetNumber'];
+        $investmentDescription = $item['investmentDescription'];
+        $postType = 'inwestycja';
+        $sz = $item['lat'];
+        $dl = $item['lng'];
+
+
+
+        if( strpos( $miasto, 'Warsza' ) !== false) {
+            echo 'Inwestcja z ' .  $miasto  . ' dodana.<br><br>';
+        }
+    
+        else if( strpos( $miasto, 'Wrocł' ) !== false) {
+            echo 'Inwestcja z ' .  $miasto  . ' dodana.<br><br>';
+        }
+    
+        else if( strpos( $miasto, 'Krakó' ) !== false) {
+            echo 'Inwestcja z ' .  $miasto  . ' dodana.<br><br>';
+        }
+    
+        else{
+            echo 'Inwestcja z ' .  $miasto  . ' zabroniona.';
+            echo "<br><hr><br>";
+            $zabronione++;
+            $liczbaWynikow++;
+            continue;
+        }
+        
+        $liczbaWynikow++;
+
+
+        // $dozwoloneMiasta = array("Warszawa","Kraków","Wrocław");
+        // if (!(in_array($miasto, $dozwoloneMiasta))) {
+        //     continue;
+        // }   
+        // echo 'Miasto: ' . $miasto . '<br/>';
+        // echo 'Opis: ' . $investmentDescription . '<br><br>';
+
+        $post = array();
+        $post['post_title'] = $postTitle ?? null;
+        $post['post_content'] = $investmentDescription ?? null;
+        $post['post_status'] = 'publish';
+        $post['post_date'] = $updateDate ?? null;
+        $post['post_type'] = $postType ?? null;
+        $post['post_author'] = 1;
+        print_r($post);
+        $post_id = wp_insert_post($post);
+        //$post_id = 3931;
+        if($post_id) {
+            update_field( 'id_inwestycji', $investId, $post_id);
+            update_field( 'miasto', $city, $post_id);
+            update_field( 'dzielnica', $quarter, $post_id);
+            update_field( 'kraj', 'Polska', $post_id);
+            update_field('sz_geo', $sz, $post_id);
+            update_field('dl_geo', $dl, $post_id);
+
+        } else {
+            echo 'error:<br>';
+            print_r($post);
+        }
+
+
+	wp_cache_delete($post_id, 'posts' );
+	wp_cache_delete($post_id, 'post_meta' );
+
+
+	global $wp_object_cache;
+
+	$wp_object_cache->flush();
+	echo "<br><hr><br>";
+}
+
+echo '<br/><br/>API zwraca w sumie '.$liczbaWynikow.' inwestycji, z których '.$zabronione.' są poza wyznaczonymi miastami.<br/><br/>';
+
+foreach($investsIDs as $j => $post){
+
+    foreach($result as $item){
+        if($item['id'] == $post)
+            continue 2;
+    }
+
+
+    wp_update_post(array(
+        'ID'    =>  $invests_post[$j],
+        'post_status'   =>  'draft'
+    ));
+}
+
+echo '<br><br><a href="http://homeasy.pl/wp-admin/"> Wróć do panelu </a><br><br>';
+
+echo PHP_EOL."KONIEC";
+
+?>
